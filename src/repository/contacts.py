@@ -7,26 +7,32 @@ from src.schemas.contact import ContactBookSchema, ContactBookSchemaUpdateSchema
 
 
 
-async def get_contacts(limit: int, offset: int, db: AsyncSession, name: str = None, secondname: str = None, email: str = None):
+async def get_contacts(limit: int, offset: int, db: AsyncSession, name: str = None, secondname: str = None, email: str = None, user_id: int = None):
     stmt = select(ContactBook).offset(offset).limit(limit)
+    
+    if user_id is not None:
+        stmt = stmt.filter(ContactBook.user_id == user_id)
     if name:
         stmt = stmt.filter(ContactBook.name.ilike(f'%{name}%'))
     if secondname:
         stmt = stmt.filter(ContactBook.secondname.ilike(f'%{secondname}%'))
     if email:
         stmt = stmt.filter(ContactBook.email.ilike(f'%{email}%'))
+        
     result = await db.execute(stmt)
     return result.scalars().all()
 
-async def get_contacts_birthday(db: AsyncSession):
+
+async def get_contacts_birthday(db: AsyncSession, user_id: int):
     today = datetime.today().date()
     seven_days_later = today + timedelta(days=7)
     
     stmt = select(ContactBook).filter(
+        ContactBook.user_id == user_id,
         or_(
-            # Для случая, когда период не пересекает новый год
+            # Коли період не переходить через новий рік
             (ContactBook.born_day >= today) & (ContactBook.born_day <= seven_days_later),
-            # Для случая перехода через новый год (например, декабрь-январь)
+            # Коли період переходить через новий рік (декабрь-січень)
             (ContactBook.born_day >= date(today.year, 1, 1)) & 
             (ContactBook.born_day <= date(today.year, 1, 7)) & 
             (today.month == 12)
@@ -35,39 +41,39 @@ async def get_contacts_birthday(db: AsyncSession):
     result = await db.execute(stmt)
     return result.scalars().all()
 
-async def get_contact_by_id(contact_id: int, db: AsyncSession):
-    stmt = select(ContactBook).filter_by(id=contact_id)
+async def get_contact_by_id(contact_id: int, db: AsyncSession, user_id: int):
+    stmt = select(ContactBook).filter_by(id=contact_id, user_id=user_id)
     result = await db.execute(stmt)
     return result.scalar_one_or_none()
 
-
-async def create_contact(body: ContactBookSchema, db:AsyncSession):
-    contact = ContactBook(**body.model_dump(exclude_unset=True))
+async def create_contact(body: ContactBookSchema, db: AsyncSession, user_id: int):
+    contact_data = body.model_dump(exclude_unset=True)
+    contact_data['user_id'] = user_id  
+    contact = ContactBook(**contact_data)
     db.add(contact)
     await db.commit()
     await db.refresh(contact)
     return contact
 
 
-async def update_contact(contact_id:int, body: ContactBookSchemaUpdateSchema, db:AsyncSession ):
-    stmt = select(ContactBook).filter_by(id = contact_id)
+async def update_contact(contact_id: int, body: ContactBookSchemaUpdateSchema, db: AsyncSession, user_id: int):
+    stmt = select(ContactBook).filter_by(id=contact_id, user_id=user_id)
     result = await db.execute(stmt)
     contact = result.scalar_one_or_none()
     if contact:
-        update_data = body.dict(exclude_unset=True)  # тільки передані поля
+        update_data = body.dict(exclude_unset=True)
         for key, value in update_data.items():
-            setattr(contact, key, value)  # оновлює значення контактів
+            setattr(contact, key, value)
         await db.commit()
         await db.refresh(contact)
     return contact
     
 
 
-
-async def delete_contact(contact_id: int, db:AsyncSession):
-    stmt = select(ContactBook).filter_by(id=contact_id)
-    contact = await db.execute(stmt)
-    contact = contact.scalar_one_or_none()
+async def delete_contact(contact_id: int, db: AsyncSession, user_id: int):
+    stmt = select(ContactBook).filter_by(id=contact_id, user_id=user_id)
+    result = await db.execute(stmt)
+    contact = result.scalar_one_or_none()
     if contact:
         await db.delete(contact)
         await db.commit()
